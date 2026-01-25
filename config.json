@@ -1,0 +1,211 @@
+{
+    "broker_host": "10.1.10.115",
+    "broker_port": 1883,
+    
+    "bac_controllers": [
+        {
+            "name": "Shattic",
+            "icon": "S",
+            "color": "#4A90D9",
+            "description": "Ship/Shattic area BAC controller"
+        },
+        {
+            "name": "Captain",
+            "icon": "C",
+            "color": "#D4A84B",
+            "description": "Captains quarters BAC controller"
+        },
+        {
+            "name": "Cove",
+            "icon": "V",
+            "color": "#45B7AA",
+            "description": "Cove area BAC controller"
+        },
+        {
+            "name": "Jungle",
+            "icon": "J",
+            "color": "#D97B9F",
+            "description": "Jungle area BAC controller"
+        }
+    ],
+    
+    "esp32_devices": [
+        {
+            "name": "Cannon1",
+            "topic": "Cannon1",
+            "icon": "C1",
+            "color": "#4A90D9",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
+        },
+        {
+            "name": "Cannon2",
+            "topic": "Cannon2",
+            "icon": "C2",
+            "color": "#4A90D9",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
+        },
+        {
+            "name": "RoseCompass",
+            "topic": "RoseCompass",
+            "icon": "RC",
+            "color": "#D4A84B",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
+        },
+        {
+            "name": "CabinDoor",
+            "topic": "CabinDoor",
+            "icon": "CD",
+            "color": "#8B4513",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET", "OPEN", "CLOSE", "STOP"]
+        },
+        {
+            "name": "ShipMotion1",
+            "topic": "ShipMotion1",
+            "icon": "M1",
+            "color": "#4A90D9",
+            "needs_protocol": true
+        },
+        {
+            "name": "ShipMotion2",
+            "topic": "ShipMotion2",
+            "icon": "M2",
+            "color": "#4A90D9",
+            "needs_protocol": true
+        },
+        {
+            "name": "ShipMotion3",
+            "topic": "ShipMotion3",
+            "icon": "M3",
+            "color": "#4A90D9",
+            "needs_protocol": true
+        },
+        {
+            "name": "BarrelPiston",
+            "topic": "BarrelPiston",
+            "icon": "BP",
+            "color": "#D4A84B",
+            "needs_protocol": true
+        },
+        {
+            "name": "JungleDoor",
+            "topic": "JungleDoor",
+            "icon": "JD",
+            "color": "#45B7AA"
+        },
+        {
+            "name": "JungleMotion1",
+            "topic": "JungleMotion1",
+            "icon": "J1",
+            "color": "#45B7AA",
+            "needs_protocol": true
+        },
+        {
+            "name": "JungleMotion2",
+            "topic": "JungleMotion2",
+            "icon": "J2",
+            "color": "#45B7AA",
+            "needs_protocol": true
+        },
+        {
+            "name": "JungleMotion3",
+            "topic": "JungleMotion3",
+            "icon": "J3",
+            "color": "#45B7AA",
+            "needs_protocol": true
+        },
+        {
+            "name": "Driftwood",
+            "topic": "Driftwood",
+            "icon": "DW",
+            "color": "#D97B9F",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET", "DIAG"]
+        },
+        {
+            "name": "Hieroglyphics",
+            "topic": "Hieroglyphics",
+            "icon": "HG",
+            "color": "#7B68D9"
+        },
+        {
+            "name": "TridentReveal",
+            "topic": "TridentReveal",
+            "icon": "TR",
+            "color": "#4A90D9"
+        },
+        {
+            "name": "SeaShells",
+            "topic": "SeaShells",
+            "icon": "SS",
+            "color": "#D97B9F"
+        },
+        {
+            "name": "StarCharts",
+            "topic": "StarCharts",
+            "icon": "SC",
+            "color": "#D4A84B"
+        },
+        {
+            "name": "CoveSlidingDoor",
+            "topic": "cove_sliding_door",
+            "icon": "SD",
+            "color": "#45B7AA",
+            "needs_protocol": true
+        },
+        {
+            "name": "WaterFountain",
+            "topic": "WaterFountain",
+            "icon": "WF",
+            "color": "#1E90FF",
+            "needs_protocol": true
+        },
+        {
+            "name": "SunDial",
+            "topic": "SunDial",
+            "icon": "SN",
+            "color": "#FFD700",
+            "needs_protocol": true
+        },
+        {
+            "name": "RuinsWallPanel",
+            "topic": "RuinsWallPanel",
+            "icon": "RW",
+            "color": "#8B4513",
+            "needs_protocol": true
+        },
+        {
+            "name": "MonkeyTombEntrance",
+            "topic": "MonkeyTombEntrance",
+            "icon": "MT",
+            "color": "#556B2F",
+            "needs_protocol": true
+        },
+        {
+            "name": "TridentCabinet",
+            "topic": "TridentCabinet",
+            "icon": "TC",
+            "color": "#4169E1",
+            "needs_protocol": true
+        },
+        {
+            "name": "MagicMirror2",
+            "topic": "MagicMirror2",
+            "icon": "MM",
+            "color": "#9370DB",
+            "needs_protocol": true
+        },
+        {
+            "name": "StarTable",
+            "topic": "StarTable",
+            "icon": "ST",
+            "color": "#DAA520",
+            "needs_protocol": true
+        },
+        {
+            "name": "TridentAltar",
+            "topic": "TridentAltar",
+            "icon": "TA",
+            "color": "#20B2AA",
+            "needs_protocol": true
+        }
+    ]
+}
