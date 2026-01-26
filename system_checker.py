@@ -630,7 +630,7 @@ DASHBOARD_HTML = """
         /* Device Card - 3D Flip Container */
         .device-card-container {
             perspective: 1000px;
-            height: 160px;
+            height: 220px;
         }
 
         .device-card {
@@ -663,17 +663,40 @@ DASHBOARD_HTML = """
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 20px 16px;
+            justify-content: flex-start;
+            padding: 20px 16px 0;
             text-align: center;
+            position: relative;
         }
+
+        /* Decorative wave graphic at bottom of card */
+        .card-wave {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            overflow: hidden;
+        }
+
+        .card-wave svg {
+            width: 100%;
+            height: 100%;
+            opacity: 0.15;
+        }
+
+        .device-card.online .card-wave svg { fill: var(--card-color); opacity: 0.25; }
+        .device-card.offline .card-wave svg { fill: #e57373; opacity: 0.2; }
+        .device-card.testing .card-wave svg { fill: #42a5f5; opacity: 0.25; }
+        .device-card.needs-protocol .card-wave svg { fill: #ff9800; opacity: 0.2; }
 
         .card-back {
             transform: rotateY(180deg);
             padding: 12px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 5px;
+            overflow-y: auto;
         }
 
         .card-back-title {
@@ -1045,7 +1068,7 @@ DASHBOARD_HTML = """
             background: rgba(74, 144, 217, 0.1);
             border: 2px dashed #4A90D9;
             border-radius: 16px;
-            height: 160px;
+            height: 220px;
         }
     </style>
 </head>
@@ -1159,6 +1182,11 @@ DASHBOARD_HTML = """
                                 style="--card-color: ${device.color};">${cmd}</button>`;
             }).join('');
 
+            // Wave SVG graphic
+            const waveSvg = `<svg viewBox="0 0 200 50" preserveAspectRatio="none">
+                <path d="M0,25 C40,45 60,5 100,25 C140,45 160,5 200,25 L200,50 L0,50 Z"/>
+            </svg>`;
+
             return `
                 <div class="device-card-container"
                      draggable="true"
@@ -1177,6 +1205,7 @@ DASHBOARD_HTML = """
                             <div class="device-name">${name}</div>
                             <div class="device-status">${statusText}</div>
                             ${pingText && !needsProtocol ? `<div class="device-ping">${pingText}</div>` : ''}
+                            <div class="card-wave">${waveSvg}</div>
                         </div>
                         <div class="card-back" style="--card-color: ${device.color};">
                             <div class="card-back-title">${name}</div>
