@@ -1,7 +1,22 @@
 {
     "broker_host": "10.1.10.115",
     "broker_port": 1883,
-    
+
+    "software_services": [
+        {
+            "name": "A2F",
+            "topic": "A2F",
+            "icon": "AF",
+            "color": "#76B900",
+            "description": "Audio2Face-3D / NIM avatar engine on COMMANDCENTER (drives RedBeard/Evalee lip-sync)",
+            "commands": ["PING", "STATUS", "RESTART", "STOP"],
+            "command_topic": "MermaidsTale/A2F/Command",
+            "status_topic": "MermaidsTale/A2F/Status",
+            "heartbeat_topic": "MermaidsTale/A2F/heartbeat"
+        }
+    ],
+
+
     "bac_controllers": [
         {
             "name": "Shattic",
@@ -52,6 +67,20 @@
             "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
         },
         {
+            "name": "SilverCompass",
+            "topic": "SilverCompass",
+            "icon": "SV",
+            "color": "#C0C0C0",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
+        },
+        {
+            "name": "BlueCompass",
+            "topic": "BlueCompass",
+            "icon": "BC",
+            "color": "#4169E1",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET"]
+        },
+        {
             "name": "CabinDoor",
             "topic": "CabinDoor",
             "icon": "CD",
@@ -84,13 +113,14 @@
             "topic": "BarrelPiston",
             "icon": "BP",
             "color": "#D4A84B",
-            "needs_protocol": true
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET", "STOP", "ENGAGE", "RETRACT", "CLEAR_SAFETY"]
         },
         {
             "name": "JungleDoor",
             "topic": "JungleDoor",
             "icon": "JD",
-            "color": "#45B7AA"
+            "color": "#45B7AA",
+            "commands": ["PING", "STATUS", "RESET", "PUZZLE_RESET", "OPEN", "CLOSE", "STOP"]
         },
         {
             "name": "JungleMotion1",
@@ -146,7 +176,7 @@
         },
         {
             "name": "CoveSlidingDoor",
-            "topic": "cove_sliding_door",
+            "topic": "CoveDoor",
             "icon": "SD",
             "color": "#45B7AA",
             "needs_protocol": true
@@ -205,6 +235,14 @@
             "topic": "TridentAltar",
             "icon": "TA",
             "color": "#20B2AA",
+            "needs_protocol": true
+        },
+        {
+            "name": "BalancingScale",
+            "topic": "BalancingScale",
+            "icon": "BS",
+            "color": "#CD853F",
+            "description": "RFID balance scale puzzle - Arduino Nano (needs ESP32 upgrade)",
             "needs_protocol": true
         }
     ]

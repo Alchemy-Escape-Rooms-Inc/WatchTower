@@ -22,7 +22,7 @@ import uuid
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class DeviceStatus(Enum):
 class DeviceType(Enum):
     BAC = "bac"
     ESP32 = "esp32"
+    SOFTWARE = "software"   # software service (e.g. A2F on COMMANDCENTER) — explicit topics, not the lowercase ESP convention
 
 
 @dataclass
@@ -53,6 +54,12 @@ class Device:
     last_error: Optional[str] = None
     commands: list = field(default_factory=lambda: ["PING", "STATUS", "RESET", "PUZZLE_RESET"])
     needs_protocol: bool = False
+    # SOFTWARE devices declare their EXACT (case-sensitive) topics. A2F uses
+    # capitalized /Command and /Status — unlike the lowercase ESP convention —
+    # so we can't derive them from topic_base. heartbeat_topic is optional.
+    command_topic: Optional[str] = None
+    status_topic: Optional[str] = None
+    heartbeat_topic: Optional[str] = None
 
 
 class SystemChecker:
@@ -68,6 +75,7 @@ class SystemChecker:
         self.pending_pings: Dict[str, dict] = {}  # ping_id -> {device_name, start_time}
         self.ping_timeout_esp32 = 3.0  # seconds for ESP32 (PING/PONG is fast)
         self.ping_timeout_bac = 15.0   # seconds for BAC (heartbeat every ~10 sec)
+        self.ping_timeout_software = 10.0  # seconds for software services (A2F over network/NIM)
 
         # Message log for display panel
         self.message_log: list = []
@@ -131,7 +139,25 @@ class SystemChecker:
                 self.devices[esp['name']] = device
                 color_idx += 1
                 logger.info(f"Loaded ESP32: {esp['name']} (needs_protocol={device.needs_protocol})")
-                
+
+            # Load software services (A2F, etc.) — explicit case-sensitive topics.
+            for svc in config.get('software_services', []):
+                base = svc.get('topic', svc['name'])
+                device = Device(
+                    name=svc['name'],
+                    device_type=DeviceType.SOFTWARE,
+                    topic_base=base,
+                    icon=svc.get('icon', '🧠'),
+                    color=svc.get('color', colors[color_idx % len(colors)]),
+                    commands=svc.get('commands', ["PING", "STATUS"]),
+                    command_topic=svc.get('command_topic', f"MermaidsTale/{base}/Command"),
+                    status_topic=svc.get('status_topic', f"MermaidsTale/{base}/Status"),
+                    heartbeat_topic=svc.get('heartbeat_topic', f"MermaidsTale/{base}/heartbeat"),
+                )
+                self.devices[svc['name']] = device
+                color_idx += 1
+                logger.info(f"Loaded SOFTWARE: {svc['name']} (cmd={device.command_topic}, status={device.status_topic}, hb={device.heartbeat_topic})")
+
             logger.info(f"Loaded {len(self.devices)} devices from config")
             
         except FileNotFoundError:
@@ -355,6 +381,34 @@ class SystemChecker:
         with self.lock:
             # Check if this is a response we're waiting for
             for device_name, device in self.devices.items():
+                # For BAC controllers, check for heartbeat match FIRST (passive monitoring)
+                if device.device_type == DeviceType.BAC:
+                    expected_prefix = f"{device.topic_base}/get/"
+                    is_bac_heartbeat = (
+                        topic.lower().startswith(expected_prefix.lower()) or
+                        (device.topic_base.lower() in topic.lower() and "/get/" in topic.lower())
+                    )
+                    if is_bac_heartbeat:
+                        # BAC heartbeat received - mark online regardless of current status
+                        if device.status != DeviceStatus.ONLINE:
+                            logger.info(f"✓ BAC {device_name} heartbeat detected on '{topic}' - marking ONLINE")
+                        device.status = DeviceStatus.ONLINE
+                        device.last_error = None
+                        device.last_test = now
+                        continue
+
+                # For SOFTWARE services (A2F), check the heartbeat FIRST too —
+                # passive monitoring, marks online regardless of current state.
+                if device.device_type == DeviceType.SOFTWARE:
+                    if device.heartbeat_topic and topic == device.heartbeat_topic:
+                        if device.status != DeviceStatus.ONLINE:
+                            logger.info(f"✓ SOFTWARE {device_name} heartbeat on '{topic}' - marking ONLINE")
+                        device.status = DeviceStatus.ONLINE
+                        device.last_error = None
+                        device.last_test = now
+                        continue
+
+                # For ESP32 / SOFTWARE active pings, only process if in TESTING state
                 if device.status != DeviceStatus.TESTING:
                     continue
 
@@ -364,23 +418,37 @@ class SystemChecker:
                 if device.device_type == DeviceType.BAC:
                     # BAC responds on {name}/get/... (case-insensitive check)
                     expected_prefix = f"{device.topic_base}/get/"
+                    logger.debug(f"BAC check: topic='{topic}' vs prefix='{expected_prefix}' -> {topic.lower().startswith(expected_prefix.lower())}")
                     if topic.lower().startswith(expected_prefix.lower()):
                         is_match = True
+                        logger.info(f"BAC {device_name}: MATCHED on '{topic}'")
                     # Also check if topic contains the BAC name anywhere (fallback)
                     elif device.topic_base.lower() in topic.lower() and "/get/" in topic.lower():
                         is_match = True
                         logger.info(f"BAC {device_name}: matched via fallback on '{topic}'")
 
                 elif device.device_type == DeviceType.ESP32:
-                    # ESP32 responds with PONG on MermaidsTale/{topic}/command
-                    expected_topic = f"MermaidsTale/{device.topic_base}/command"
-                    if topic == expected_topic and payload == "PONG":
+                    # ESP32 responds with PONG - accept on either command or status topic
+                    command_topic = f"MermaidsTale/{device.topic_base}/command"
+                    status_topic = f"MermaidsTale/{device.topic_base}/status"
+
+                    if topic == command_topic and payload == "PONG":
                         is_match = True
-                    # Also accept status messages as proof of life
-                    elif topic == f"MermaidsTale/{device.topic_base}/status":
+                    # Accept PONG on status topic too (backwards compatibility)
+                    elif topic == status_topic and payload == "PONG":
+                        is_match = True
+                    # Accept any status message as proof of life
+                    elif topic == status_topic:
                         is_match = True
                     else:
-                        logger.debug(f"ESP32 {device_name}: topic '{topic}' != '{expected_topic}' or payload '{payload}' != 'PONG'")
+                        logger.debug(f"ESP32 {device_name}: topic '{topic}' not matching, payload '{payload}'")
+
+                elif device.device_type == DeviceType.SOFTWARE:
+                    # Software service (A2F) active-ping reply: any message on its
+                    # EXACT (case-sensitive) status topic is proof of life. The
+                    # COMMANDCENTER agent replies here to PING with PONG / status.
+                    if device.status_topic and topic == device.status_topic:
+                        is_match = True
 
                 if is_match:
                     # Calculate response time
@@ -421,7 +489,15 @@ class SystemChecker:
             topic = f"MermaidsTale/{device.topic_base}/command"
             self.mqtt_client.publish(topic, "PING")
             logger.info(f"→ Pinged ESP32 {device_name} on {topic}")
-        
+
+        elif device.device_type == DeviceType.SOFTWARE:
+            # Software service (A2F): PING on its EXACT command topic; the
+            # COMMANDCENTER agent replies on the status topic. Heartbeat (if
+            # the agent sends one) also keeps it ONLINE passively.
+            topic = device.command_topic or f"MermaidsTale/{device.topic_base}/Command"
+            self.mqtt_client.publish(topic, "PING")
+            logger.info(f"→ Pinged SOFTWARE {device_name} on {topic}")
+
         return True
     
     def ping_all_devices(self):
@@ -437,8 +513,13 @@ class SystemChecker:
             for device in self.devices.values():
                 if device.status == DeviceStatus.TESTING and device.last_test:
                     elapsed = (now - device.last_test).total_seconds()
-                    # Use different timeout for BAC vs ESP32
-                    timeout = self.ping_timeout_bac if device.device_type == DeviceType.BAC else self.ping_timeout_esp32
+                    # Use different timeout per device type
+                    if device.device_type == DeviceType.BAC:
+                        timeout = self.ping_timeout_bac
+                    elif device.device_type == DeviceType.SOFTWARE:
+                        timeout = self.ping_timeout_software
+                    else:
+                        timeout = self.ping_timeout_esp32
                     if elapsed > timeout:
                         device.status = DeviceStatus.OFFLINE
                         device.last_error = "No response"
@@ -631,6 +712,7 @@ DASHBOARD_HTML = """
         .device-card-container {
             perspective: 1000px;
             height: 220px;
+            position: relative;
         }
 
         .device-card {
@@ -638,15 +720,51 @@ DASHBOARD_HTML = """
             width: 100%;
             height: 100%;
             transform-style: preserve-3d;
-            transition: transform 0.5s;
+            transition: transform 0.5s ease, width 0.5s ease, height 0.5s ease;
         }
 
-        .device-card-container:hover .device-card {
+        /* Expanded state - hide placeholder in grid */
+        .device-card-container.expanded .device-card {
+            visibility: hidden;
+        }
+
+        /* Semi-transparent backdrop when expanded */
+        .card-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+            z-index: 1000;
+        }
+
+        .card-backdrop.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Portal for expanded cards - no perspective interference */
+        #card-portal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1001;
+        }
+
+        #card-portal .device-card {
+            pointer-events: auto;
+            position: absolute;
             transform: rotateY(180deg);
-        }
-
-        .device-card-container:hover .device-card.needs-protocol {
-            transform: none;
+            transform-style: preserve-3d;
+            width: 280px;
+            height: 320px;
         }
 
         .card-front, .card-back {
@@ -666,7 +784,81 @@ DASHBOARD_HTML = """
             justify-content: flex-start;
             padding: 20px 16px 0;
             text-align: center;
-            position: relative;
+        }
+
+        .card-back {
+            transform: rotateY(180deg);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        .card-back-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--card-color);
+        }
+
+        .card-back-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            background: var(--card-color);
+            color: white;
+        }
+
+        .card-back-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .card-back-status {
+            font-size: 11px;
+            color: #888;
+        }
+
+        .cmd-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            flex: 1;
+            align-content: start;
+        }
+
+        .cmd-btn {
+            padding: 12px 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f0f4f8;
+            color: #2c3e50;
+        }
+
+        .cmd-btn:hover {
+            background: var(--card-color);
+            color: white;
+            transform: scale(1.03);
+        }
+
+        .cmd-btn.primary {
+            background: var(--card-color);
+            color: white;
+        }
+
+        .cmd-btn.primary:hover {
+            filter: brightness(1.1);
         }
 
         /* Decorative wave graphic at bottom of card */
@@ -689,46 +881,6 @@ DASHBOARD_HTML = """
         .device-card.offline .card-wave svg { fill: #e57373; opacity: 0.2; }
         .device-card.testing .card-wave svg { fill: #42a5f5; opacity: 0.25; }
         .device-card.needs-protocol .card-wave svg { fill: #ff9800; opacity: 0.2; }
-
-        .card-back {
-            transform: rotateY(180deg);
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            overflow-y: auto;
-        }
-
-        .card-back-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 4px;
-            text-align: center;
-        }
-
-        .cmd-btn {
-            padding: 8px 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: #f0f4f8;
-            color: #2c3e50;
-        }
-
-        .cmd-btn:hover {
-            background: var(--card-color);
-            color: white;
-            transform: scale(1.02);
-        }
-
-        .cmd-btn.primary {
-            background: var(--card-color);
-            color: white;
-        }
 
         .card-front::before {
             content: '';
@@ -1153,8 +1305,17 @@ DASHBOARD_HTML = """
             <p>Testing devices...</p>
         </div>
     </div>
+
+    <!-- Backdrop for expanded cards -->
+    <div id="card-backdrop" class="card-backdrop" onclick="collapseCard()"></div>
+
+    <!-- Portal container for expanded cards (outside perspective containers) -->
+    <div id="card-portal"></div>
     
     <script>
+        let expandedCard = null;
+        let cardOriginalRect = null;
+
         function createDeviceCard(name, device) {
             const pingText = device.response_ms ? `${device.response_ms}ms` : '';
             const needsProtocol = device.needs_protocol || false;
@@ -1174,6 +1335,11 @@ DASHBOARD_HTML = """
 
             const statusClass = needsProtocol ? 'needs-protocol' : device.status;
 
+            // Wave SVG graphic
+            const waveSvg = `<svg viewBox="0 0 200 50" preserveAspectRatio="none">
+                <path d="M0,25 C40,45 60,5 100,25 C140,45 160,5 200,25 L200,50 L0,50 Z"/>
+            </svg>`;
+
             // Build command buttons for the back of the card
             const cmdButtons = commands.map(cmd => {
                 const isPrimary = cmd === 'PING' || cmd === 'STATUS';
@@ -1182,16 +1348,12 @@ DASHBOARD_HTML = """
                                 style="--card-color: ${device.color};">${cmd}</button>`;
             }).join('');
 
-            // Wave SVG graphic
-            const waveSvg = `<svg viewBox="0 0 200 50" preserveAspectRatio="none">
-                <path d="M0,25 C40,45 60,5 100,25 C140,45 160,5 200,25 L200,50 L0,50 Z"/>
-            </svg>`;
-
             return `
                 <div class="device-card-container"
                      draggable="true"
                      data-device="${name}"
                      data-type="${device.type}"
+                     onclick="expandCard(this, event)"
                      ondragstart="handleDragStart(event)"
                      ondragend="handleDragEnd(event)"
                      ondragover="handleDragOver(event)"
@@ -1199,7 +1361,7 @@ DASHBOARD_HTML = """
                      ondrop="handleDrop(event)">
                     <div class="device-card ${statusClass}"
                          style="--card-color: ${device.color}; --card-shadow: ${device.color}40;">
-                        <div class="card-front" onclick="testDevice('${name}')">
+                        <div class="card-front">
                             ${needsProtocol ? '<span class="needs-protocol-badge">NEEDS UPDATE</span>' : ''}
                             <div class="device-icon">${device.icon}</div>
                             <div class="device-name">${name}</div>
@@ -1208,13 +1370,114 @@ DASHBOARD_HTML = """
                             <div class="card-wave">${waveSvg}</div>
                         </div>
                         <div class="card-back" style="--card-color: ${device.color};">
-                            <div class="card-back-title">${name}</div>
-                            ${cmdButtons}
+                            <div class="card-back-header">
+                                <div class="card-back-icon">${device.icon}</div>
+                                <div>
+                                    <div class="card-back-title">${name}</div>
+                                    <div class="card-back-status">${statusText}</div>
+                                </div>
+                            </div>
+                            <div class="cmd-grid">
+                                ${cmdButtons}
+                            </div>
                         </div>
                     </div>
                 </div>
             `;
         }
+
+        let expandedCardElement = null;  // Store reference to the moved card
+        let originalParent = null;       // Store where to put it back
+
+        function expandCard(container, event) {
+            // Don't expand if clicking a button
+            if (event.target.classList.contains('cmd-btn')) return;
+
+            // Don't expand if dragging
+            if (container.classList.contains('dragging')) return;
+
+            // If already expanded, collapse it
+            if (container.classList.contains('expanded')) {
+                collapseCard();
+                return;
+            }
+
+            // Collapse any other expanded card first
+            if (expandedCard) {
+                collapseCard();
+            }
+
+            // Get the card element (child of container)
+            const card = container.querySelector('.device-card');
+            if (!card) return;
+
+            // Get the card's current position BEFORE moving it
+            const rect = card.getBoundingClientRect();
+            cardOriginalRect = rect;
+
+            // Calculate position
+            let left = rect.left;
+            let top = rect.top;
+
+            // Keep within viewport bounds (accounting for expanded size)
+            const expandedWidth = 280;
+            const expandedHeight = 320;
+            if (left + expandedWidth > window.innerWidth - 10) {
+                left = window.innerWidth - expandedWidth - 10;
+            }
+            if (top + expandedHeight > window.innerHeight - 10) {
+                top = window.innerHeight - expandedHeight - 10;
+            }
+            if (left < 10) left = 10;
+            if (top < 10) top = 10;
+
+            // Store references for restoring later
+            originalParent = container;
+            expandedCardElement = card;
+
+            // Move card to portal (escapes the perspective container)
+            const portal = document.getElementById('card-portal');
+            portal.appendChild(card);
+
+            // Set position on the card
+            card.style.left = left + 'px';
+            card.style.top = top + 'px';
+
+            // Add expanded class
+            container.classList.add('expanded');
+            expandedCard = container;
+
+            // Show backdrop
+            document.getElementById('card-backdrop').classList.add('show');
+        }
+
+        function collapseCard() {
+            if (!expandedCard || !expandedCardElement || !originalParent) return;
+
+            // Reset inline styles
+            expandedCardElement.style.left = '';
+            expandedCardElement.style.top = '';
+
+            // Move card back to original container
+            originalParent.appendChild(expandedCardElement);
+
+            // Remove expanded class
+            expandedCard.classList.remove('expanded');
+            expandedCard = null;
+            expandedCardElement = null;
+            originalParent = null;
+            cardOriginalRect = null;
+
+            // Hide backdrop
+            document.getElementById('card-backdrop').classList.remove('show');
+        }
+
+        // Close expanded card on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && expandedCard) {
+                collapseCard();
+            }
+        });
 
         async function sendCommand(deviceName, command) {
             try {
@@ -1516,7 +1779,11 @@ DASHBOARD_HTML = """
 
 @app.route('/')
 def dashboard():
-    return render_template_string(DASHBOARD_HTML)
+    response = app.make_response(render_template_string(DASHBOARD_HTML))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/api/status')
